@@ -203,3 +203,110 @@ void check_inactive_users() {
     pthread_mutex_unlock(user_mutex);
 }
 
+// Envía un mensaje a todos los usuarios
+void broadcast_message(const char *message) {
+    pthread_mutex_lock(user_mutex);
+    
+    struct user *current = user_list;
+    while (current) {
+        // Preparar buffer
+        unsigned char *buf = (unsigned char *)malloc(LWS_PRE + strlen(message) + 1);
+        if (buf) {
+            memcpy(&buf[LWS_PRE], message, strlen(message) + 1);
+            
+            // Encolar envío
+            lws_callback_on_writable(current->wsi);
+            // El envío real se realizará en el callback LWS_CALLBACK_SERVER_WRITEABLE
+        }
+        
+        current = current->next;
+    }
+    
+    pthread_mutex_unlock(user_mutex);
+}
+
+
+
+// Prepara respuesta con lista de usuarios
+char *get_user_list_json() {
+    pthread_mutex_lock(user_mutex);
+    
+    // Crear array JSON para la lista de usuarios
+    struct json_object *user_array = json_object_new_array();
+    struct user *current = user_list;
+    
+    while (current) {
+        json_object_array_add(user_array, json_object_new_string(current->username));
+        current = current->next;
+    }
+    
+    // Crear objeto JSON de respuesta
+    struct json_object *response = json_object_new_object();
+    json_object_object_add(response, "type", json_object_new_string("list_users_response"));
+    json_object_object_add(response, "sender", json_object_new_string("server"));
+    json_object_object_add(response, "content", user_array);
+    json_object_object_add(response, "timestamp", json_object_new_int64(time(NULL)));
+    
+    const char *json_string = json_object_to_json_string(response);
+    char *result = strdup(json_string);
+    
+    json_object_put(response);
+    pthread_mutex_unlock(user_mutex);
+    
+    return result;
+}
+
+// Genera respuesta JSON con información de un usuario
+char *get_user_info_json(const char *username) {
+    pthread_mutex_lock(user_mutex);
+    
+    struct user *current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            // Crear objeto JSON con información de usuario
+            struct json_object *user_info = json_object_new_object();
+            json_object_object_add(user_info, "ip", json_object_new_string(current->ip));
+            
+            const char *status_str;
+            switch (current->status) {
+                case ACTIVE: status_str = "ACTIVO"; break;
+                case BUSY: status_str = "OCUPADO"; break;
+                case INACTIVE: status_str = "INACTIVO"; break;
+                default: status_str = "DESCONOCIDO"; break;
+            }
+            
+            json_object_object_add(user_info, "status", json_object_new_string(status_str));
+            
+            // Crear respuesta completa
+            struct json_object *response = json_object_new_object();
+            json_object_object_add(response, "type", json_object_new_string("user_info_response"));
+            json_object_object_add(response, "sender", json_object_new_string("server"));
+            json_object_object_add(response, "target", json_object_new_string(username));
+            json_object_object_add(response, "content", user_info);
+            json_object_object_add(response, "timestamp", json_object_new_int64(time(NULL)));
+            
+            const char *json_string = json_object_to_json_string(response);
+            char *result = strdup(json_string);
+            
+            json_object_put(response);
+            pthread_mutex_unlock(user_mutex);
+            
+            return result;
+        }
+        current = current->next;
+    }
+    
+    // Usuario no encontrado
+    struct json_object *response = json_object_new_object();
+    json_object_object_add(response, "type", json_object_new_string("error"));
+    json_object_object_add(response, "sender", json_object_new_string("server"));
+    json_object_object_add(response, "content", json_object_new_string("Usuario no encontrado"));
+    json_object_object_add(response, "timestamp", json_object_new_int64(time(NULL)));
+    
+    const char *json_string = json_object_to_json_string(response);
+    char *result = strdup(json_string);
+    json_object_put(response);
+    pthread_mutex_unlock(user_mutex);
+    
+    return result;
+}
