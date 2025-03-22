@@ -133,7 +133,6 @@ void handle_broadcast(struct json_object *json_msg) {
         }
     }
 
-
 // Maneja solicitudes de lista de usuarios
 void handle_list_users(struct lws *wsi) {
     char *response = get_user_list_json();
@@ -143,8 +142,7 @@ void handle_list_users(struct lws *wsi) {
     lws_write(wsi, buffer + LWS_PRE, len, LWS_WRITE_TEXT);
     
     free(response);
-} 
-
+}
 
 // Maneja solicitudes de información de usuario
 void handle_user_info(struct lws *wsi, struct json_object *json_msg) {
@@ -164,6 +162,31 @@ void handle_user_info(struct lws *wsi, struct json_object *json_msg) {
     }
 }
 
+// Maneja cambios de estado
+void handle_change_status(struct json_object *json_msg) {
+    struct json_object *json_sender, *json_content;
+    const char *sender, *status_str;
+    
+    if (json_object_object_get_ex(json_msg, "sender", &json_sender) &&
+        json_object_object_get_ex(json_msg, "content", &json_content)) {
+        
+        sender = json_object_get_string(json_sender);
+        status_str = json_object_get_string(json_content);
+        
+        int status;
+        if (strcmp(status_str, "ACTIVO") == 0) {
+            status = ACTIVE;
+        } else if (strcmp(status_str, "OCUPADO") == 0) {
+            status = BUSY;
+        } else if (strcmp(status_str, "INACTIVO") == 0) {
+            status = INACTIVE;
+        } else {
+            return; // Estado inválido
+        }
+        
+        update_user_status(sender, status);
+    }
+}
 
 // Maneja desconexiones
 void handle_disconnect(struct lws *wsi, const char *username) {
