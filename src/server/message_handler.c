@@ -134,6 +134,17 @@ void handle_broadcast(struct json_object *json_msg) {
     }
 
 
+// Maneja solicitudes de lista de usuarios
+void handle_list_users(struct lws *wsi) {
+    char *response = get_user_list_json();
+    
+    int len = strlen(response);
+    memcpy(buffer + LWS_PRE, response, len);
+    lws_write(wsi, buffer + LWS_PRE, len, LWS_WRITE_TEXT);
+    
+    free(response);
+} 
+
 
 // Maneja solicitudes de información de usuario
 void handle_user_info(struct lws *wsi, struct json_object *json_msg) {
