@@ -106,7 +106,23 @@ void remove_user_by_wsi(struct lws *wsi) {
     pthread_mutex_unlock(user_mutex);
 }
 
+// Busca un usuario por su nombre
+User *find_user_by_name(const char *username) {
+    pthread_mutex_lock(user_mutex);
     
+    struct user *current = user_list;
+    while (current) {
+        if (strcmp(current->username, username) == 0) {
+            pthread_mutex_unlock(user_mutex);
+            return current;
+        }
+        current = current->next;
+    }
+    
+    pthread_mutex_unlock(user_mutex);
+    return NULL;
+}
+
 // Actualiza el estado de un usuario
 int update_user_status(const char *username, UserStatus new_status) {
     pthread_mutex_lock(user_mutex);
