@@ -13,3 +13,10 @@ y luego
 ```bash
 ./server [numero del puerto quieras ej: 9000]
 ```
+
+Con el Makefile:
+```bash
+make         # Compila
+make run     # Ejecuta ./server 9000
+make clean   # Limpia todo
+```
