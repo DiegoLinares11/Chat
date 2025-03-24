@@ -6,9 +6,6 @@
 #include <json-c/json.h>
 #include "user_manager.h"
 #include "message_handler.h"
-#include "../../common/protocol.h"
-#include "../../common/json_utils.h"
-
 
 // Buffer para mensajes salientes
 static unsigned char buffer[LWS_PRE + 4096];

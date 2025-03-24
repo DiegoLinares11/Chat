@@ -225,7 +225,28 @@ void broadcast_message(const char *message) {
     pthread_mutex_unlock(user_mutex);
 }
 
-
+// Envía un mensaje a todos excepto al remitente
+void broadcast_message_except(const char *message, struct lws *exclude_wsi) {
+    pthread_mutex_lock(user_mutex);
+    
+    struct user *current = user_list;
+    while (current) {
+        if (current->wsi != exclude_wsi) {
+            // Preparar buffer
+            unsigned char *buf = (unsigned char *)malloc(LWS_PRE + strlen(message) + 1);
+            if (buf) {
+                memcpy(&buf[LWS_PRE], message, strlen(message) + 1);
+                
+                // Encolar envío
+                lws_callback_on_writable(current->wsi);
+            }
+        }
+        
+        current = current->next;
+    }
+    
+    pthread_mutex_unlock(user_mutex);
+}
 
 // Prepara respuesta con lista de usuarios
 char *get_user_list_json() {
