@@ -9,6 +9,7 @@
 #include "network.h"
 #include "message_handler.h"
 
+
 #define MAX_MESSAGE_LENGTH 1024
 
 // Contexto global del cliente
@@ -70,15 +71,13 @@ void *input_thread(void *arg) {
         } else {
             send_broadcast_message(ctx.wsi, ctx.username, input);
         }
-    }
-    return NULL;
-}
+
+
 
 // Callback del WebSocket (conexión, recepción, cierre, etc.)
-static int callback_client(struct lws *wsi, enum lws_callback_reasons reason,
-                           void *user, void *in, size_t len) {
-    switch (reason) {
-        case LWS_CALLBACK_CLIENT_ESTABLISHED:
+
+
+
             send_register_message(wsi, ctx.username);
             add_message_to_ui(ctx.chat_win, "Conectado al servidor y registrado.");
             break;
@@ -90,6 +89,7 @@ static int callback_client(struct lws *wsi, enum lws_callback_reasons reason,
         case LWS_CALLBACK_CLIENT_CLOSED:
             add_message_to_ui(ctx.chat_win, "Conexión cerrada.");
             ctx.interrupted = 1;
+
             break;
 
         default:
@@ -97,6 +97,7 @@ static int callback_client(struct lws *wsi, enum lws_callback_reasons reason,
     }
     return 0;
 }
+
 
 // Protocolos WebSocket
 static struct lws_protocols protocols[] = {
@@ -159,4 +160,5 @@ int main(int argc, char *argv[]) {
     lws_context_destroy(ctx.context);
     end_ui();
     return EXIT_SUCCESS;
+
 }

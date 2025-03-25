@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <json-c/json.h>
+
 #include "ui.h"
 
 // Función para procesar un mensaje JSON recibido desde el servidor
@@ -67,3 +68,4 @@ void handle_server_message(WINDOW *chat_win, WINDOW *users_win, const char *json
 
     json_object_put(msg);
 }
+

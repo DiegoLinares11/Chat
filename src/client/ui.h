@@ -17,4 +17,5 @@ void get_input_line(WINDOW *input_win, char *buffer, size_t size);
 // Actualizar lista de usuarios
 void update_user_list(WINDOW *users_win, struct json_object *user_array);
 
+
 #endif
