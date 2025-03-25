@@ -1,23 +1,19 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g `pkg-config --cflags libwebsockets json-c ncurses`
-LDFLAGS = `pkg-config --libs libwebsockets json-c ncurses`
 
-SRC = client.c \
-      network.c \
-      message_handler.c \
-      user_input.c \
-      ui.c
+CFLAGS = -Wall -Wextra -g
+LIBS = -lwebsockets -ljson-c -lncurses -lpthread
 
+SRC = client.c network.c message_handler.c ui.c
 OBJ = $(SRC:.c=.o)
-TARGET = chat_client
+BIN = client_chat
 
-all: $(TARGET)
+all: $(BIN)
 
-$(TARGET): $(OBJ)
-	$(CC) -o $(TARGET) $(OBJ) $(LDFLAGS)
+$(BIN): $(OBJ)
+	$(CC) $(OBJ) -o $(BIN) $(LIBS)
 
 %.o: %.c
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f *.o $(BIN)

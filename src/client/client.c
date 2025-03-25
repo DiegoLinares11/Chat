@@ -8,51 +8,88 @@
 #include "ui.h"
 #include "network.h"
 #include "message_handler.h"
-#include "user_input.h"
-#include "client_context.h"
+
 
 #define MAX_MESSAGE_LENGTH 1024
 
-struct client_context client_ctx;
+// Contexto global del cliente
+struct client_context {
+    char username[32];
+    struct lws_context *context;
+    struct lws *wsi;
+    int interrupted;
+
+    // Ventanas UI
+    WINDOW *chat_win;
+    WINDOW *input_win;
+    WINDOW *users_win;
+};
+
+static struct client_context ctx;
 
 // Thread para recibir mensajes del servidor
-void *message_receiver(void *arg) {
-    while (!client_ctx.interrupted) {
-        lws_service(client_ctx.context, 50);
+void *receiver_thread(void *arg) {
+    while (!ctx.interrupted) {
+        lws_service(ctx.context, 50); // Procesa eventos WebSocket
     }
     return NULL;
 }
 
-// Callback de WebSocket
-static int callback_client(struct lws *wsi, enum lws_callback_reasons reason,
-                           void *user, void *in, size_t len) {
-    switch (reason) {
-        case LWS_CALLBACK_CLIENT_ESTABLISHED:
-            send_register_message(client_ctx.username);
-            add_message_to_ui("Conectado al servidor. Enviando registro...", NULL);
+// Thread para leer entrada del usuario y enviar mensajes
+void *input_thread(void *arg) {
+    char input[MAX_MESSAGE_LENGTH];
+
+    while (!ctx.interrupted) {
+        get_input_line(ctx.input_win, input, MAX_MESSAGE_LENGTH);
+
+        if (strncmp(input, "/exit", 5) == 0) {
+            send_disconnect_message(ctx.wsi, ctx.username);
+            ctx.interrupted = 1;
+            break;
+        } else if (strncmp(input, "/list", 5) == 0) {
+            send_list_users(ctx.wsi, ctx.username);
+        } else if (strncmp(input, "/status ", 8) == 0) {
+            send_change_status(ctx.wsi, ctx.username, input + 8);
+        } else if (strncmp(input, "/info ", 6) == 0) {
+            send_user_info(ctx.wsi, ctx.username, input + 6);
+        } else if (strcmp(input, "/help") == 0) {
+            add_message_to_ui(ctx.chat_win, "Comandos disponibles:");
+            add_message_to_ui(ctx.chat_win, "/list           -> Mostrar usuarios conectados");
+            add_message_to_ui(ctx.chat_win, "/info <usuario> -> Ver IP y estado de un usuario");
+            add_message_to_ui(ctx.chat_win, "/status <estado>-> Cambiar tu estado (ACTIVO, OCUPADO, INACTIVO)");
+            add_message_to_ui(ctx.chat_win, "@usuario <msg>  -> Enviar mensaje privado");
+            add_message_to_ui(ctx.chat_win, "mensaje libre   -> Enviar mensaje general (broadcast)");
+            add_message_to_ui(ctx.chat_win, "/exit           -> Salir del chat");
+        } else if (input[0] == '@') {
+            char *space = strchr(input, ' ');
+            if (space) {
+                *space = '\0';
+                const char *target = input + 1;
+                const char *message = space + 1;
+                send_private_message(ctx.wsi, ctx.username, target, message);
+            }
+        } else {
+            send_broadcast_message(ctx.wsi, ctx.username, input);
+        }
+
+
+
+// Callback del WebSocket (conexión, recepción, cierre, etc.)
+
+
+
+            send_register_message(wsi, ctx.username);
+            add_message_to_ui(ctx.chat_win, "Conectado al servidor y registrado.");
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            if (len < 1) break;
-
-            pthread_mutex_lock(&client_ctx.mutex);
-            if (client_ctx.queue_size < 10) {
-                strncpy(client_ctx.message_queue[client_ctx.queue_tail], (char *)in, MAX_MESSAGE_LENGTH - 1);
-                client_ctx.message_queue[client_ctx.queue_tail][MAX_MESSAGE_LENGTH - 1] = '\0';
-                client_ctx.queue_tail = (client_ctx.queue_tail + 1) % 10;
-                client_ctx.queue_size++;
-                pthread_cond_signal(&client_ctx.recv_cond);
-            }
-            pthread_mutex_unlock(&client_ctx.mutex);
-            break;
-
-        case LWS_CALLBACK_CLIENT_WRITEABLE:
-            send_next_message(); // Enviar si hay mensajes pendientes
+            handle_server_message(ctx.chat_win, ctx.users_win, (const char *)in);
             break;
 
         case LWS_CALLBACK_CLIENT_CLOSED:
-            add_message_to_ui("Conexión con el servidor cerrada", NULL);
-            client_ctx.interrupted = 1;
+            add_message_to_ui(ctx.chat_win, "Conexión cerrada.");
+            ctx.interrupted = 1;
+
             break;
 
         default:
@@ -61,116 +98,67 @@ static int callback_client(struct lws *wsi, enum lws_callback_reasons reason,
     return 0;
 }
 
-// Protocolos soportados
+
+// Protocolos WebSocket
 static struct lws_protocols protocols[] = {
-    {
-        "chat-protocol",
-        callback_client,
-        0,
-        4096,
-    },
-    { NULL, NULL, 0, 0 }
+    { "chat-protocol", callback_client, 0, MAX_MESSAGE_LENGTH, 0, NULL, 0 },
+    { NULL, NULL, 0, 0, 0, NULL, 0 }
 };
 
-// Signal para terminar
-void sigint_handler(int sig) {
-    client_ctx.interrupted = 1;
-}
-
-// Thread que procesa la cola de mensajes
-void *message_processor(void *arg) {
-    char message[MAX_MESSAGE_LENGTH];
-
-    while (!client_ctx.interrupted) {
-        pthread_mutex_lock(&client_ctx.mutex);
-        while (client_ctx.queue_size == 0 && !client_ctx.interrupted) {
-            pthread_cond_wait(&client_ctx.recv_cond, &client_ctx.mutex);
-        }
-
-        if (client_ctx.interrupted) {
-            pthread_mutex_unlock(&client_ctx.mutex);
-            break;
-        }
-
-        strncpy(message, client_ctx.message_queue[client_ctx.queue_head], MAX_MESSAGE_LENGTH);
-        client_ctx.queue_head = (client_ctx.queue_head + 1) % 10;
-        client_ctx.queue_size--;
-        pthread_mutex_unlock(&client_ctx.mutex);
-
-        process_incoming_message(message); // manejar mensaje JSON
-    }
-
-    return NULL;
-}
-
-int main(int argc, char **argv) {
-    struct lws_context_creation_info info;
-    pthread_t service_thread, processor_thread;
-    char input_buffer[256];
-    int port;
-
+int main(int argc, char *argv[]) {
     if (argc != 4) {
-        fprintf(stderr, "Uso: %s <nombredeusuario> <IPdelservidor> <puertodelservidor>\n", argv[0]);
-        return 1;
+        fprintf(stderr, "Uso: %s <usuario> <IP> <puerto>\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
-    memset(&client_ctx, 0, sizeof(client_ctx));
-    strncpy(client_ctx.username, argv[1], sizeof(client_ctx.username) - 1);
+    strncpy(ctx.username, argv[1], sizeof(ctx.username) - 1);
 
-    port = atoi(argv[3]);
-    if (port <= 0) {
-        fprintf(stderr, "Puerto inválido\n");
-        return 1;
-    }
+    struct lws_context_creation_info info = {0};
+    struct lws_client_connect_info ccinfo = {0};
 
-    pthread_mutex_init(&client_ctx.mutex, NULL);
-    pthread_cond_init(&client_ctx.recv_cond, NULL);
-    signal(SIGINT, sigint_handler);
+    // Inicializar la interfaz
+    init_ui(&ctx.chat_win, &ctx.input_win, &ctx.users_win);
 
-    // Inicializar libwebsockets
-    memset(&info, 0, sizeof(info));
+    // Configurar contexto WebSocket
     info.port = CONTEXT_PORT_NO_LISTEN;
     info.protocols = protocols;
-    info.gid = -1;
-    info.uid = -1;
-
-    client_ctx.context = lws_create_context(&info);
-    if (!client_ctx.context) {
-        fprintf(stderr, "Error al crear el contexto WebSocket\n");
-        return 1;
+    ctx.context = lws_create_context(&info);
+    if (!ctx.context) {
+        end_ui();
+        fprintf(stderr, "Error creando contexto WebSocket.\n");
+        return EXIT_FAILURE;
     }
 
-    if (!connect_to_server(client_ctx.context, argv[2], port)) {
-        fprintf(stderr, "Error al conectar al servidor\n");
-        lws_context_destroy(client_ctx.context);
-        return 1;
+    // Conexión con el servidor
+    ccinfo.context = ctx.context;
+    ccinfo.address = argv[2];
+    ccinfo.port = atoi(argv[3]);
+    ccinfo.path = "/chat";
+    ccinfo.host = ccinfo.address;
+    ccinfo.origin = ccinfo.address;
+    ccinfo.protocol = protocols[0].name;
+    ccinfo.pwsi = &ctx.wsi;
+
+    if (!lws_client_connect_via_info(&ccinfo)) {
+        end_ui();
+        fprintf(stderr, "No se pudo conectar al servidor.\n");
+        return EXIT_FAILURE;
     }
 
-    // Inicializar UI
-    init_ui();
+    add_message_to_ui(ctx.chat_win, "💡 Comandos disponibles: /help /list /info /status /exit @usuario mensaje");
+    add_message_to_ui(ctx.chat_win, "🧠 Escribí /help en cualquier momento para ver esta lista otra vez.");
 
-    // Iniciar threads
-    pthread_create(&service_thread, NULL, message_receiver, NULL);
-    pthread_create(&processor_thread, NULL, message_processor, NULL);
+    // Crear hilos
+    pthread_t recv_thread, input_thr;
+    pthread_create(&recv_thread, NULL, receiver_thread, NULL);
+    pthread_create(&input_thr, NULL, input_thread, NULL);
 
-    // Bucle principal
-    while (!client_ctx.interrupted) {
-        read_user_input(input_buffer, sizeof(input_buffer));
-        if (input_buffer[0] != '\0') {
-            process_user_input(input_buffer);
-        }
-        update_ui();
-        usleep(50000); // 50ms
-    }
+    pthread_join(input_thr, NULL);
+    pthread_join(recv_thread, NULL);
 
-    send_disconnect_message();
-    pthread_join(service_thread, NULL);
-    pthread_join(processor_thread, NULL);
-    destroy_ui();
-    lws_context_destroy(client_ctx.context);
-    pthread_mutex_destroy(&client_ctx.mutex);
-    pthread_cond_destroy(&client_ctx.recv_cond);
+    // Finalizar
+    lws_context_destroy(ctx.context);
+    end_ui();
+    return EXIT_SUCCESS;
 
-    printf("Cliente finalizado\n");
-    return 0;
 }

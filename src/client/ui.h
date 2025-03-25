@@ -1,13 +1,21 @@
 #ifndef UI_H
 #define UI_H
 
-void init_ui();
-void destroy_ui();
+#include <ncurses.h>
+#include <json-c/json.h>
 
-void add_message_to_ui(const char *message, const char *sender);
-void read_user_input(char *buffer, size_t size);
-void update_ui();
-void show_help_message();
-void update_users_list(char **users, int count);
+// Inicializar y finalizar interfaz
+void init_ui(WINDOW **chat, WINDOW **input, WINDOW **users);
+void end_ui(void);
+
+// Mensajes
+void add_message_to_ui(WINDOW *win, const char *msg);
+
+// Entrada de usuario
+void get_input_line(WINDOW *input_win, char *buffer, size_t size);
+
+// Actualizar lista de usuarios
+void update_user_list(WINDOW *users_win, struct json_object *user_array);
+
 
 #endif

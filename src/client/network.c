@@ -1,89 +1,110 @@
 #include <stdio.h>
-#include <stdlib.h>
+
 #include <string.h>
-#include <time.h>
 #include <libwebsockets.h>
 #include <json-c/json.h>
-#include "network.h"
-#include "client_context.h"
-#include "../common/protocol.h"
 #include "ui.h"
 
-#define MAX_SEND_BUFFER 4096
+// Tamaño máximo para mensajes
+#define MAX_JSON_SIZE 1024
 
-// Cola simple de salida (1 mensaje por ahora)
-static char pending_message[MAX_SEND_BUFFER];
-static int has_pending_message = 0;
-
-// Enviar mensaje por WebSocket
-void send_message_raw(const char *json_str) {
-    if (!client_ctx.wsi) return;
+// Función auxiliar para enviar un objeto JSON por WebSocket
+void send_json_message(struct lws *wsi, struct json_object *jobj) {
+    const char *json_str = json_object_to_json_string(jobj);
+    unsigned char buffer[LWS_PRE + MAX_JSON_SIZE];
+    unsigned char *p = &buffer[LWS_PRE];
 
     size_t len = strlen(json_str);
-    unsigned char buffer[LWS_PRE + MAX_SEND_BUFFER];
-    unsigned char *ptr = &buffer[LWS_PRE];
-
-    strncpy((char *)ptr, json_str, MAX_SEND_BUFFER - 1);
-    ptr[MAX_SEND_BUFFER - 1] = '\0';
-
-    lws_callback_on_writable(client_ctx.wsi);
-    has_pending_message = 1;
-    strncpy((char *)pending_message, json_str, MAX_SEND_BUFFER - 1);
-    pending_message[MAX_SEND_BUFFER - 1] = '\0';
-}
-
-// Función pública para enviar el siguiente mensaje
-void send_next_message() {
-    if (has_pending_message && client_ctx.wsi) {
-        unsigned char buffer[LWS_PRE + MAX_SEND_BUFFER];
-        unsigned char *ptr = &buffer[LWS_PRE];
-        int len = strlen(pending_message);
-
-        strncpy((char *)ptr, pending_message, MAX_SEND_BUFFER - 1);
-        lws_write(client_ctx.wsi, ptr, len, LWS_WRITE_TEXT);
-        has_pending_message = 0;
+    if (len >= MAX_JSON_SIZE) {
+        fprintf(stderr, "Mensaje JSON demasiado grande.\n");
+        return;
     }
-}
 
-// Conexión WebSocket al servidor
-int connect_to_server(struct lws_context *context, const char *server_ip, int port) {
-    struct lws_client_connect_info conn_info;
-    memset(&conn_info, 0, sizeof(conn_info));
-
-    conn_info.context = context;
-    conn_info.address = server_ip;
-    conn_info.port = port;
-    conn_info.path = "/chat";
-    conn_info.host = conn_info.address;
-    conn_info.origin = conn_info.address;
-    conn_info.protocol = "chat-protocol";
-
-    client_ctx.wsi = lws_client_connect_via_info(&conn_info);
-    return client_ctx.wsi != NULL;
+    memcpy(p, json_str, len);
+    lws_write(wsi, p, len, LWS_WRITE_TEXT);
 }
 
 // Enviar mensaje de registro
-void send_register_message(const char *username) {
-    struct json_object *msg = json_object_new_object();
-    json_object_object_add(msg, "type", json_object_new_string(TYPE_REGISTER));
-    json_object_object_add(msg, "sender", json_object_new_string(username));
-    json_object_object_add(msg, "content", NULL);
+void send_register_message(struct lws *wsi, const char *username) {
+    struct json_object *jobj = json_object_new_object();
 
-    const char *json_str = json_object_to_json_string(msg);
-    send_message_raw(json_str);
+    json_object_object_add(jobj, "type", json_object_new_string("register"));
+    json_object_object_add(jobj, "sender", json_object_new_string(username));
+    json_object_object_add(jobj, "content", NULL);
 
-    json_object_put(msg); // Libera memoria
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
+}
+
+// Enviar mensaje de broadcast (chat general)
+void send_broadcast_message(struct lws *wsi, const char *sender, const char *message) {
+    struct json_object *jobj = json_object_new_object();
+
+    json_object_object_add(jobj, "type", json_object_new_string("broadcast"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+    json_object_object_add(jobj, "content", json_object_new_string(message));
+
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
+}
+
+// Enviar mensaje privado
+void send_private_message(struct lws *wsi, const char *sender, const char *target, const char *message) {
+    struct json_object *jobj = json_object_new_object();
+
+    json_object_object_add(jobj, "type", json_object_new_string("private"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+    json_object_object_add(jobj, "target", json_object_new_string(target));
+    json_object_object_add(jobj, "content", json_object_new_string(message));
+
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
+}
+
+// Enviar solicitud para listar usuarios
+void send_list_users(struct lws *wsi, const char *sender) {
+    struct json_object *jobj = json_object_new_object();
+
+    json_object_object_add(jobj, "type", json_object_new_string("list_users"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
+}
+
+// Enviar solicitud de información de un usuario específico
+void send_user_info(struct lws *wsi, const char *sender, const char *target) {
+    struct json_object *jobj = json_object_new_object();
+
+    json_object_object_add(jobj, "type", json_object_new_string("user_info"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+    json_object_object_add(jobj, "target", json_object_new_string(target));
+
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
+}
+
+// Enviar cambio de estado (ACTIVO, OCUPADO, INACTIVO)
+void send_change_status(struct lws *wsi, const char *sender, const char *status) {
+    struct json_object *jobj = json_object_new_object();
+
+    json_object_object_add(jobj, "type", json_object_new_string("change_status"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+    json_object_object_add(jobj, "content", json_object_new_string(status));
+
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
 }
 
 // Enviar mensaje de desconexión
-void send_disconnect_message() {
-    struct json_object *msg = json_object_new_object();
-    json_object_object_add(msg, "type", json_object_new_string(TYPE_DISCONNECT));
-    json_object_object_add(msg, "sender", json_object_new_string(client_ctx.username));
-    json_object_object_add(msg, "content", json_object_new_string("Cierre de sesión"));
+void send_disconnect_message(struct lws *wsi, const char *sender) {
+    struct json_object *jobj = json_object_new_object();
 
-    const char *json_str = json_object_to_json_string(msg);
-    send_message_raw(json_str);
+    json_object_object_add(jobj, "type", json_object_new_string("disconnect"));
+    json_object_object_add(jobj, "sender", json_object_new_string(sender));
+    json_object_object_add(jobj, "content", json_object_new_string("Cierre de sesión"));
 
-    json_object_put(msg);
+    send_json_message(wsi, jobj);
+    json_object_put(jobj);
 }
+
