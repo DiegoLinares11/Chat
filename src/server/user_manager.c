@@ -127,40 +127,42 @@ User *find_user_by_name(const char *username) {
 
 // Actualiza el estado de un usuario
 int update_user_status(const char *username, UserStatus new_status) {
+    struct user *current;
+    char message[256];
+    const char *status_str;
+
     pthread_mutex_lock(user_mutex);
-    
-    struct user *current = user_list;
+
+    current = user_list;
     while (current) {
         if (strcmp(current->username, username) == 0) {
             current->status = new_status;
             current->last_activity = time(NULL);
-            
-            // Notificar cambio de estado
-            char message[256];
-            const char *status_str;
-            
+
             switch (new_status) {
                 case ACTIVE: status_str = "ACTIVO"; break;
                 case BUSY: status_str = "OCUPADO"; break;
                 case INACTIVE: status_str = "INACTIVO"; break;
                 default: status_str = "DESCONOCIDO"; break;
             }
-            
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"%s\"},\"timestamp\":\"%ld\"}", 
+
+            snprintf(message, sizeof(message),
+                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"%s\"},\"timestamp\":\"%ld\"}",
                      username, status_str, time(NULL));
-            
-            broadcast_message(message);
-            
-            pthread_mutex_unlock(user_mutex);
+
+            pthread_mutex_unlock(user_mutex);  //liberar mutex antes de enviar mensaje
+
+            broadcast_message(message);  //ahora si enviar mensaje
+
             return 1;
         }
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
     return 0;
 }
+
 
 // Actualiza la actividad de un usuario
 void update_user_activity(const char *username) {
