@@ -12,12 +12,15 @@ typedef enum {
     INACTIVE
 } UserStatus;
 
+struct per_session_data;
+
 // Estructura del usuario
 typedef struct user {
-    char username[32];
-    char ip[32];
+    char username[64];
+    char ip[64];
     UserStatus status;
     struct lws *wsi;
+    struct per_session_data *pss; 
     time_t last_activity;
     struct user *next;
 } User;

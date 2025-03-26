@@ -10,6 +10,7 @@
 #include "user_manager.h"
 #include "message_handler.h"
 #include "server_context.h" 
+#include "session.h"
 
 
 #define MAX_PAYLOAD 4096
@@ -31,9 +32,24 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
     const char *sender = NULL;
     
     switch (reason) {
-        case LWS_CALLBACK_ESTABLISHED:
-            printf("WebSocket connection established\n");
+        case LWS_CALLBACK_ESTABLISHED: {
+            per_session_data *pss = (per_session_data *)user;
+            memset(pss, 0, sizeof(per_session_data));
+            printf("Nueva conexión establecida\n");
             break;
+        }
+
+        case LWS_CALLBACK_SERVER_WRITEABLE: {
+            per_session_data *pss = (per_session_data *)user;
+            if (pss->buffer_ready) {
+                lws_write(wsi, (unsigned char *)pss->buffer + LWS_PRE, pss->buffer_len, LWS_WRITE_TEXT);
+                pss->buffer_ready = 0;
+            }
+            break;
+        }
+
+
+
             
         case LWS_CALLBACK_RECEIVE:
             // Procesar mensaje recibido como JSON
@@ -99,10 +115,10 @@ static struct lws_protocols protocols[] = {
     {
         "chat-protocol",
         callback_chat,
-        0, // per_session_data_size
+        sizeof(per_session_data),
         MAX_PAYLOAD,
     },
-    { NULL, NULL, 0, 0 } // terminador
+    { NULL, NULL, 0, 0 }
 };
 
 // Manejador de señal para terminar limpiamente
@@ -169,4 +185,4 @@ int main(int argc, char **argv)
 
     printf("Servidor finalizado\n");
     return 0;
-}
+} 
