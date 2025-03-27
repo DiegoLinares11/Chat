@@ -188,4 +188,4 @@ void handle_change_status(struct json_object *json_msg) {
 // Maneja desconexiones
 void handle_disconnect(struct lws *wsi, const char *username) {
     remove_user_by_wsi(wsi);
-}
+} 
