@@ -10,4 +10,5 @@ void add_message_to_ui(WINDOW *win, const char *msg);
 void clear_users_ui(WINDOW *win);
 void add_user_to_ui(WINDOW *win, const char *user);
 
+
 #endif

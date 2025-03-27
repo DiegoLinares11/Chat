@@ -10,6 +10,7 @@
 #include "user_manager.h"
 #include "message_handler.h"
 #include "server_context.h" 
+#include "session.h"
 
 
 #define MAX_PAYLOAD 4096
@@ -19,6 +20,7 @@ struct server_context server_ctx;
 
 // Lista de usuarios conectados
 static struct user *user_list = NULL;
+
 
 // Callback para manejar eventos de WebSocket
 static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
@@ -31,9 +33,44 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
     const char *sender = NULL;
     
     switch (reason) {
-        case LWS_CALLBACK_ESTABLISHED:
-            printf("WebSocket connection established\n");
+        case LWS_CALLBACK_ESTABLISHED: {
+            per_session_data *pss = (per_session_data *)user;
+            memset(pss, 0, sizeof(per_session_data));
+            printf("Nueva conexión establecida\n");
             break;
+        }
+
+        case LWS_CALLBACK_SERVER_WRITEABLE: {
+            per_session_data *pss = (per_session_data *)user;
+
+            if (pss->buffer_ready) {
+                lws_write(wsi, (unsigned char *)pss->buffer + LWS_PRE, pss->buffer_len, LWS_WRITE_TEXT);
+                pss->buffer_ready = 0;
+            }
+
+            // 🔍 Verifica si este usuario tiene pendiente un mensaje de estado INACTIVO
+            User *u = find_user_by_wsi(wsi);
+            if (u && u->needs_status_broadcast) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                    "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"INACTIVO\"},\"timestamp\":\"%ld\"}",
+                    u->username, time(NULL));
+
+                snprintf(pss->buffer + LWS_PRE, MAX_PAYLOAD, "%s", msg);
+                pss->buffer_len = strlen(pss->buffer + LWS_PRE);
+                pss->buffer_ready = 1;
+                u->needs_status_broadcast = 0;
+
+                // volver a pedir permiso para escribir
+                lws_callback_on_writable(wsi);
+            }
+
+            break;
+        }
+
+
+
+
             
         case LWS_CALLBACK_RECEIVE:
             // Procesar mensaje recibido como JSON
@@ -99,10 +136,10 @@ static struct lws_protocols protocols[] = {
     {
         "chat-protocol",
         callback_chat,
-        0, // per_session_data_size
+        sizeof(per_session_data),
         MAX_PAYLOAD,
     },
-    { NULL, NULL, 0, 0 } // terminador
+    { NULL, NULL, 0, 0 }
 };
 
 // Manejador de señal para terminar limpiamente
@@ -169,4 +206,4 @@ int main(int argc, char **argv)
 
     printf("Servidor finalizado\n");
     return 0;
-}
+} 

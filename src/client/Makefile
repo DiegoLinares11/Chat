@@ -1,4 +1,5 @@
 CC = gcc
+
 CFLAGS = -Wall -Wextra -g
 LIBS = -lwebsockets -ljson-c -lpthread
 

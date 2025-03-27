@@ -6,10 +6,14 @@
 #include <libwebsockets.h>
 #include <json-c/json.h>
 #include "user_manager.h"
+#include "session.h"
+#include "server_context.h"  /
+
 
 #define MAX_PAYLOAD 4096
-#define INACTIVITY_TIMEOUT 300 // 5 minutos en segundos
+#define INACTIVITY_TIMEOUT 10 //en segundos
 
+extern struct server_context server_ctx;
 
 // Lista de usuarios y mutex para sincronización
 static struct user *user_list = NULL;
@@ -35,9 +39,8 @@ void cleanup_user_manager() {
 
 // Añade un nuevo usuario a la lista
 int add_user(struct lws *wsi, const char *username, const char *ip) {
-    // Comprobar si el usuario ya existe
     pthread_mutex_lock(user_mutex);
-    
+
     struct user *current = user_list;
     while (current) {
         if (strcmp(current->username, username) == 0) {
@@ -46,65 +49,72 @@ int add_user(struct lws *wsi, const char *username, const char *ip) {
         }
         current = current->next;
     }
-    
-    // Crear nuevo usuario
+
     struct user *new_user = (struct user *)malloc(sizeof(struct user));
     if (!new_user) {
         pthread_mutex_unlock(user_mutex);
-        return -1; // Error de memoria
+        return -1;
     }
-    
+
     strncpy(new_user->username, username, sizeof(new_user->username)-1);
     new_user->username[sizeof(new_user->username)-1] = '\0';
-    
     strncpy(new_user->ip, ip, sizeof(new_user->ip)-1);
     new_user->ip[sizeof(new_user->ip)-1] = '\0';
-    
+
     new_user->status = ACTIVE;
     new_user->wsi = wsi;
     new_user->last_activity = time(NULL);
-    
-    // Añadir a la lista
+
+    // Esta línea es nueva: obtenemos el pss desde wsi y lo guardamos
+    new_user->pss = (per_session_data *)lws_wsi_user(wsi);
+
     new_user->next = user_list;
     user_list = new_user;
-    
+
     pthread_mutex_unlock(user_mutex);
-    return 1; // Éxito
+    return 1;
 }
+
 
 // Elimina un usuario por su websocket
 void remove_user_by_wsi(struct lws *wsi) {
+    char message[128];
+    int found = 0;
+
     pthread_mutex_lock(user_mutex);
-    
+
     struct user *current = user_list;
     struct user *prev = NULL;
-    
+
     while (current) {
         if (current->wsi == wsi) {
-            // Broadcast notification of user disconnect
-            char message[128];
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"user_disconnected\",\"sender\":\"server\",\"content\":\"%s ha salido\",\"timestamp\":\"%ld\"}", 
+            snprintf(message, sizeof(message),
+                     "{\"type\":\"user_disconnected\",\"sender\":\"server\",\"content\":\"%s ha salido\",\"timestamp\":\"%ld\"}",
                      current->username, time(NULL));
-            broadcast_message_except(message, wsi);
-            
-            // Remove from list
+
             if (prev) {
                 prev->next = current->next;
             } else {
                 user_list = current->next;
             }
-            
+
             free(current);
+            found = 1;
             break;
         }
-        
+
         prev = current;
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
+
+    if (found) {
+        //  el broadcast afuera del lock
+        broadcast_message_except(message, wsi);
+    }
 }
+
 
 // Busca un usuario por su nombre
 User *find_user_by_name(const char *username) {
@@ -125,40 +135,42 @@ User *find_user_by_name(const char *username) {
 
 // Actualiza el estado de un usuario
 int update_user_status(const char *username, UserStatus new_status) {
+    struct user *current;
+    char message[256];
+    const char *status_str;
+
     pthread_mutex_lock(user_mutex);
-    
-    struct user *current = user_list;
+
+    current = user_list;
     while (current) {
         if (strcmp(current->username, username) == 0) {
             current->status = new_status;
             current->last_activity = time(NULL);
-            
-            // Notificar cambio de estado
-            char message[256];
-            const char *status_str;
-            
+
             switch (new_status) {
                 case ACTIVE: status_str = "ACTIVO"; break;
                 case BUSY: status_str = "OCUPADO"; break;
                 case INACTIVE: status_str = "INACTIVO"; break;
                 default: status_str = "DESCONOCIDO"; break;
             }
-            
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"%s\"},\"timestamp\":\"%ld\"}", 
+
+            snprintf(message, sizeof(message),
+                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"%s\"},\"timestamp\":\"%ld\"}",
                      username, status_str, time(NULL));
-            
-            broadcast_message(message);
-            
-            pthread_mutex_unlock(user_mutex);
+
+            pthread_mutex_unlock(user_mutex);  //liberar mutex antes de enviar mensaje
+
+            broadcast_message(message);  //ahora si enviar mensaje
+
             return 1;
         }
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
     return 0;
 }
+
 
 // Actualiza la actividad de un usuario
 void update_user_activity(const char *username) {
@@ -179,29 +191,30 @@ void update_user_activity(const char *username) {
 // Verifica usuarios inactivos
 void check_inactive_users() {
     time_t current_time = time(NULL);
+
     pthread_mutex_lock(user_mutex);
-    
+
     struct user *current = user_list;
     while (current) {
-        if (current->status != INACTIVE && 
+        if (current->status != INACTIVE &&
             difftime(current_time, current->last_activity) > INACTIVITY_TIMEOUT) {
             
             // Cambiar a inactivo
             current->status = INACTIVE;
-            
-            // Notificar cambio
-            char message[256];
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"INACTIVO\"},\"timestamp\":\"%ld\"}", 
-                     current->username, current_time);
-            
-            broadcast_message(message);
+            current->needs_status_broadcast = 1;
+
+            // ahora (debug)
+            printf("[INFO] Usuario %s marcado como INACTIVO\n", current->username);
         }
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
+
+    // ⚠️ Esto despierta el hilo principal de libwebsockets
+    lws_cancel_service(server_ctx.lws_context);
 }
+
 
 // Envía un mensaje a todos los usuarios
 void broadcast_message(const char *message) {
@@ -209,21 +222,19 @@ void broadcast_message(const char *message) {
     
     struct user *current = user_list;
     while (current) {
-        // Preparar buffer
-        unsigned char *buf = (unsigned char *)malloc(LWS_PRE + strlen(message) + 1);
-        if (buf) {
-            memcpy(&buf[LWS_PRE], message, strlen(message) + 1);
-            
-            // Encolar envío
+        per_session_data *pss = (per_session_data *)lws_wsi_user(current->wsi);
+        if (pss) {
+            snprintf(pss->buffer + LWS_PRE, MAX_PAYLOAD, "%s", message);
+            pss->buffer_len = strlen(pss->buffer + LWS_PRE);
+            pss->buffer_ready = 1;
             lws_callback_on_writable(current->wsi);
-            // El envío real se realizará en el callback LWS_CALLBACK_SERVER_WRITEABLE
         }
-        
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
 }
+
 
 // Envía un mensaje a todos excepto al remitente
 void broadcast_message_except(const char *message, struct lws *exclude_wsi) {
@@ -232,21 +243,20 @@ void broadcast_message_except(const char *message, struct lws *exclude_wsi) {
     struct user *current = user_list;
     while (current) {
         if (current->wsi != exclude_wsi) {
-            // Preparar buffer
-            unsigned char *buf = (unsigned char *)malloc(LWS_PRE + strlen(message) + 1);
-            if (buf) {
-                memcpy(&buf[LWS_PRE], message, strlen(message) + 1);
-                
-                // Encolar envío
+            per_session_data *pss = (per_session_data *)lws_wsi_user(current->wsi);
+            if (pss) {
+                snprintf(pss->buffer + LWS_PRE, MAX_PAYLOAD, "%s", message);
+                pss->buffer_len = strlen(pss->buffer + LWS_PRE);
+                pss->buffer_ready = 1;
                 lws_callback_on_writable(current->wsi);
             }
         }
-        
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
 }
+
 
 // Prepara respuesta con lista de usuarios
 char *get_user_list_json() {
@@ -330,4 +340,17 @@ char *get_user_info_json(const char *username) {
     pthread_mutex_unlock(user_mutex);
     
     return result;
+}
+User *find_user_by_wsi(struct lws *wsi) {
+    pthread_mutex_lock(user_mutex);
+    struct user *current = user_list;
+    while (current) {
+        if (current->wsi == wsi) {
+            pthread_mutex_unlock(user_mutex);
+            return current;
+        }
+        current = current->next;
+    }
+    pthread_mutex_unlock(user_mutex);
+    return NULL;
 }

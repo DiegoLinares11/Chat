@@ -59,3 +59,4 @@ void handle_server_message(void *unused1, void *unused2, const char *json_str) {
     fflush(stdout);
     json_object_put(msg);
 }
+
