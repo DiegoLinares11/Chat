@@ -20,5 +20,5 @@ void send_disconnect_message(struct lws *wsi, const char *sender);
 // Interno
 void send_json_message(struct lws *wsi, struct json_object *jobj);
 
-
 #endif // NETWORK_H
+

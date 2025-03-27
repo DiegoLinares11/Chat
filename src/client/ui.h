@@ -2,20 +2,13 @@
 #define UI_H
 
 #include <ncurses.h>
-#include <json-c/json.h>
 
-// Inicializar y finalizar interfaz
-void init_ui(WINDOW **chat, WINDOW **input, WINDOW **users);
-void end_ui(void);
-
-// Mensajes
+void init_ui(WINDOW **chat_win, WINDOW **input_win, WINDOW **users_win);
+void end_ui();
+void get_input_line(WINDOW *win, char *buffer, int max_len);
 void add_message_to_ui(WINDOW *win, const char *msg);
-
-// Entrada de usuario
-void get_input_line(WINDOW *input_win, char *buffer, size_t size);
-
-// Actualizar lista de usuarios
-void update_user_list(WINDOW *users_win, struct json_object *user_array);
+void clear_users_ui(WINDOW *win);
+void add_user_to_ui(WINDOW *win, const char *user);
 
 
 #endif

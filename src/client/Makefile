@@ -1,9 +1,9 @@
 CC = gcc
 
 CFLAGS = -Wall -Wextra -g
-LIBS = -lwebsockets -ljson-c -lncurses -lpthread
+LIBS = -lwebsockets -ljson-c -lpthread
 
-SRC = client.c network.c message_handler.c ui.c
+SRC = client_console.c network.c message_handler.c
 OBJ = $(SRC:.c=.o)
 BIN = client_chat
 
