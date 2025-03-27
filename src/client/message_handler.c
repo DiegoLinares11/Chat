@@ -3,7 +3,6 @@
 #include <json-c/json.h>
 #include "ui.h"
 
-// Función para procesar un mensaje JSON recibido desde el servidor
 void handle_server_message(WINDOW *chat_win, WINDOW *users_win, const char *json_str) {
     struct json_object *msg = json_tokener_parse(json_str);
     if (!msg) {
@@ -17,7 +16,7 @@ void handle_server_message(WINDOW *chat_win, WINDOW *users_win, const char *json
     struct json_object *content_obj = json_object_object_get(msg, "content");
 
     if (strcmp(type, "register_success") == 0) {
-        add_message_to_ui(chat_win, "Registro exitoso.");
+        add_message_to_ui(chat_win, "✅ Registro exitoso.");
     } else if (strcmp(type, "broadcast") == 0) {
         const char *text = json_object_get_string(content_obj);
         char buffer[256];
@@ -31,9 +30,11 @@ void handle_server_message(WINDOW *chat_win, WINDOW *users_win, const char *json
     } else if (strcmp(type, "list_users_response") == 0) {
         if (json_object_is_type(content_obj, json_type_array)) {
             int len = json_object_array_length(content_obj);
+            clear_users_ui(users_win);
             add_message_to_ui(chat_win, "Usuarios conectados:");
             for (int i = 0; i < len; i++) {
                 const char *user = json_object_get_string(json_object_array_get_idx(content_obj, i));
+                add_user_to_ui(users_win, user);
                 add_message_to_ui(chat_win, user);
             }
         }
