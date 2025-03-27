@@ -7,11 +7,13 @@
 #include <json-c/json.h>
 #include "user_manager.h"
 #include "session.h"
+#include "server_context.h"  /
 
 
 #define MAX_PAYLOAD 4096
-#define INACTIVITY_TIMEOUT 300 // 5 minutos en segundos
+#define INACTIVITY_TIMEOUT 10 //en segundos
 
+extern struct server_context server_ctx;
 
 // Lista de usuarios y mutex para sincronización
 static struct user *user_list = NULL;
@@ -183,29 +185,29 @@ void update_user_activity(const char *username) {
 // Verifica usuarios inactivos
 void check_inactive_users() {
     time_t current_time = time(NULL);
+
     pthread_mutex_lock(user_mutex);
-    
+
     struct user *current = user_list;
     while (current) {
-        if (current->status != INACTIVE && 
+        if (current->status != INACTIVE &&
             difftime(current_time, current->last_activity) > INACTIVITY_TIMEOUT) {
             
             // Cambiar a inactivo
             current->status = INACTIVE;
-            
-            // Notificar cambio
-            char message[256];
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"INACTIVO\"},\"timestamp\":\"%ld\"}", 
-                     current->username, current_time);
-            
-            broadcast_message(message);
+
+            // 🔥 Solo imprimir por ahora (debug)
+            printf("[INFO] Usuario %s marcado como INACTIVO\n", current->username);
         }
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
+
+    // ⚠️ Esto despierta el hilo principal de libwebsockets
+    lws_cancel_service(server_ctx.lws_context);
 }
+
 
 // Envía un mensaje a todos los usuarios
 void broadcast_message(const char *message) {
