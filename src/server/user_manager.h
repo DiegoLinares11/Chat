@@ -23,6 +23,7 @@ typedef struct user {
     struct per_session_data *pss; 
     time_t last_activity;
     struct user *next;
+    int needs_status_broadcast;
 } User;
 
 // Inicialización y limpieza
@@ -46,5 +47,6 @@ void broadcast_message_except(const char *message, struct lws *exclude_wsi);
 // Generación de respuestas JSON
 char* get_user_list_json();
 char* get_user_info_json(const char *username);
+User *find_user_by_wsi(struct lws *wsi);
 
 #endif // USER_MANAGER_H

@@ -21,6 +21,7 @@ struct server_context server_ctx;
 // Lista de usuarios conectados
 static struct user *user_list = NULL;
 
+
 // Callback para manejar eventos de WebSocket
 static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
                         void *user, void *in, size_t len)
@@ -41,12 +42,32 @@ static int callback_chat(struct lws *wsi, enum lws_callback_reasons reason,
 
         case LWS_CALLBACK_SERVER_WRITEABLE: {
             per_session_data *pss = (per_session_data *)user;
+
             if (pss->buffer_ready) {
                 lws_write(wsi, (unsigned char *)pss->buffer + LWS_PRE, pss->buffer_len, LWS_WRITE_TEXT);
                 pss->buffer_ready = 0;
             }
+
+            // 🔍 Verifica si este usuario tiene pendiente un mensaje de estado INACTIVO
+            User *u = find_user_by_wsi(wsi);
+            if (u && u->needs_status_broadcast) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                    "{\"type\":\"status_update\",\"sender\":\"server\",\"content\":{\"user\":\"%s\",\"status\":\"INACTIVO\"},\"timestamp\":\"%ld\"}",
+                    u->username, time(NULL));
+
+                snprintf(pss->buffer + LWS_PRE, MAX_PAYLOAD, "%s", msg);
+                pss->buffer_len = strlen(pss->buffer + LWS_PRE);
+                pss->buffer_ready = 1;
+                u->needs_status_broadcast = 0;
+
+                // volver a pedir permiso para escribir
+                lws_callback_on_writable(wsi);
+            }
+
             break;
         }
+
 
 
 

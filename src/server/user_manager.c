@@ -65,7 +65,7 @@ int add_user(struct lws *wsi, const char *username, const char *ip) {
     new_user->wsi = wsi;
     new_user->last_activity = time(NULL);
 
-    // ⚠️ Esta línea es nueva: obtenemos el pss desde wsi y lo guardamos
+    // Esta línea es nueva: obtenemos el pss desde wsi y lo guardamos
     new_user->pss = (per_session_data *)lws_wsi_user(wsi);
 
     new_user->next = user_list;
@@ -78,37 +78,43 @@ int add_user(struct lws *wsi, const char *username, const char *ip) {
 
 // Elimina un usuario por su websocket
 void remove_user_by_wsi(struct lws *wsi) {
+    char message[128];
+    int found = 0;
+
     pthread_mutex_lock(user_mutex);
-    
+
     struct user *current = user_list;
     struct user *prev = NULL;
-    
+
     while (current) {
         if (current->wsi == wsi) {
-            // Broadcast notification of user disconnect
-            char message[128];
-            snprintf(message, sizeof(message), 
-                     "{\"type\":\"user_disconnected\",\"sender\":\"server\",\"content\":\"%s ha salido\",\"timestamp\":\"%ld\"}", 
+            snprintf(message, sizeof(message),
+                     "{\"type\":\"user_disconnected\",\"sender\":\"server\",\"content\":\"%s ha salido\",\"timestamp\":\"%ld\"}",
                      current->username, time(NULL));
-            broadcast_message_except(message, wsi);
-            
-            // Remove from list
+
             if (prev) {
                 prev->next = current->next;
             } else {
                 user_list = current->next;
             }
-            
+
             free(current);
+            found = 1;
             break;
         }
-        
+
         prev = current;
         current = current->next;
     }
-    
+
     pthread_mutex_unlock(user_mutex);
+
+    if (found) {
+        //  el broadcast afuera del lock
+        broadcast_message_except(message, wsi);
+    }
 }
+
 
 // Busca un usuario por su nombre
 User *find_user_by_name(const char *username) {
@@ -195,8 +201,9 @@ void check_inactive_users() {
             
             // Cambiar a inactivo
             current->status = INACTIVE;
+            current->needs_status_broadcast = 1;
 
-            // 🔥 Solo imprimir por ahora (debug)
+            // ahora (debug)
             printf("[INFO] Usuario %s marcado como INACTIVO\n", current->username);
         }
         current = current->next;
